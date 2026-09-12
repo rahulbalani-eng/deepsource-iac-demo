@@ -192,7 +192,7 @@ PY
   curl -sS -o ingest_response.txt -w "Insights ingest HTTP %{http_code}\n" \
     -X POST \
     -H "Content-Type: application/json" \
-    -H "Authorization: Bearer ${token}" \
+    -H "x-api-key: ${token}" \
     -H "Harness-Account: ${account}" \
     --data @ingest_findings.json \
     "${endpoint}/api/orgs/${org}/projects/${project}/workspaces/${workspace}/insights/security" || true
