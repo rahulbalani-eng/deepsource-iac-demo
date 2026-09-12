@@ -28,13 +28,21 @@ query {
         node {
           status
           commitOid
-          issues(first: 50) {
+        }
+      }
+    }
+    issues(first: 50) {
+      edges {
+        node {
+          issue {
+            title
+            shortcode
+            severity
+          }
+          occurrences(first: 5) {
             edges {
               node {
-                title
                 path
-                severity
-                shortcode
               }
             }
           }
@@ -63,7 +71,11 @@ echo "$RESPONSE" | python3 -c '
 import json, sys
 
 data = json.load(sys.stdin)
-repo = data.get("data", {}).get("repository")
+if data.get("errors"):
+    print("GraphQL errors:")
+    print(json.dumps(data["errors"], indent=2))
+
+repo = (data.get("data") or {}).get("repository")
 if not repo:
     print("No repository data returned. Check DEEPSOURCE_REPO/LOGIN/VCS and that the repo is activated.")
     print(json.dumps(data, indent=2))
@@ -71,25 +83,35 @@ if not repo:
 
 name = repo.get("name")
 activated = repo.get("isActivated")
-runs = repo.get("latestAnalysisRun", {}).get("edges", [])
-if not runs:
-    print("Repository %r activated=%r but no analysis runs yet." % (name, activated))
-    sys.exit(0)
-
-run = runs[0]["node"]
-commit = (run.get("commitOid") or "")[:8]
-print("Repository: %s  |  Run status: %s  |  Commit: %s" % (name, run.get("status"), commit))
+runs = (repo.get("latestAnalysisRun") or {}).get("edges") or []
+if runs:
+    run = runs[0]["node"]
+    commit = (run.get("commitOid") or "")[:8]
+    print("Repository: %s  |  activated=%s  |  Run status: %s  |  Commit: %s" % (
+        name, activated, run.get("status"), commit))
+else:
+    print("Repository: %s  |  activated=%s  |  no analysis runs yet" % (name, activated))
 print("-" * 56)
 
-issues = run.get("issues", {}).get("edges", [])
+issues = (repo.get("issues") or {}).get("edges") or []
 if not issues:
-    print("No issues found on this run.")
+    print("No issues found on the default branch.")
 else:
+    total = 0
     for edge in issues:
-        node = edge["node"]
-        print("[%8s] %-12s %s" % (node.get("severity"), node.get("shortcode"), node.get("path")))
-        print("           %s" % node.get("title"))
+        node = edge.get("node") or {}
+        issue = node.get("issue") or {}
+        occs = ((node.get("occurrences") or {}).get("edges") or [])
+        paths = []
+        for occ in occs:
+            path = ((occ.get("node") or {}).get("path"))
+            if path:
+                paths.append(path)
+        path_str = ", ".join(paths) if paths else "(no path)"
+        print("[%s] %s  %s" % (issue.get("severity"), issue.get("shortcode"), path_str))
+        print("           %s" % issue.get("title"))
+        total += 1
     print("-" * 56)
-    print("Total issues: %s" % len(issues))
+    print("Total issues: %s" % total)
 '
 echo "======================================================="
