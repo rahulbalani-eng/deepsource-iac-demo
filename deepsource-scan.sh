@@ -115,3 +115,91 @@ else:
     print("Total issues: %s" % total)
 '
 echo "======================================================="
+
+# Convert GraphQL issues into the Insights ingest payload and POST them.
+# Plan success is not required. Missing IACM endpoint/token skips ingest
+# without failing the step (so Init/Plan can still run).
+python3 - <<'PY'
+import json, os, sys
+
+raw = open("deepsource_findings.json").read()
+data = json.loads(raw)
+repo = (data.get("data") or {}).get("repository") or {}
+findings = []
+for edge in ((repo.get("issues") or {}).get("edges") or []):
+    node = edge.get("node") or {}
+    issue = node.get("issue") or {}
+    occs = ((node.get("occurrences") or {}).get("edges") or [])
+    paths = []
+    for occ in occs:
+        path = ((occ.get("node") or {}).get("path"))
+        if path:
+            paths.append(path)
+    shortcode = issue.get("shortcode") or ""
+    title = issue.get("title") or ""
+    if not shortcode or not title:
+        continue
+    findings.append({
+        "title": title,
+        "severity": issue.get("severity") or "",
+        "shortcode": shortcode,
+        "path": ", ".join(paths),
+        "details_link": os.environ.get("DEEPSOURCE_DETAILS_LINK", ""),
+    })
+open("ingest_findings.json", "w").write(json.dumps({"findings": findings}))
+print("Prepared %d finding(s) for Insights ingest." % len(findings))
+PY
+
+ingest_insights() {
+  local endpoint token account org project workspace
+  if [[ -n "${PLUGIN_ENDPOINT_VARIABLES:-}" ]]; then
+    eval "$(python3 - <<'PY'
+import json, os, shlex
+raw = os.environ.get("PLUGIN_ENDPOINT_VARIABLES") or "{}"
+try:
+    d = json.loads(raw)
+except Exception:
+    d = {}
+for k, env in (
+    ("base_url", "IACM_BASE_URL"),
+    ("token", "IACM_TOKEN"),
+    ("account_id", "IACM_ACCOUNT"),
+    ("org_id", "IACM_ORG"),
+    ("project_id", "IACM_PROJECT"),
+    ("workspace_id", "IACM_WORKSPACE"),
+):
+    v = d.get(k) or ""
+    print("export %s=%s" % (env, shlex.quote(str(v))))
+PY
+)"
+  fi
+
+  endpoint="${HARNESS_IACM_SERVICE_ENDPOINT:-${IACM_BASE_URL:-}}"
+  token="${HARNESS_IACM_SERVICE_TOKEN:-${IACM_TOKEN:-}}"
+  account="${HARNESS_ACCOUNT_ID:-${IACM_ACCOUNT:-}}"
+  org="${HARNESS_ORG_ID:-${IACM_ORG:-default}}"
+  project="${HARNESS_PROJECT_ID:-${IACM_PROJECT:-test}}"
+  workspace="${PLUGIN_WORKSPACE:-${IACM_WORKSPACE:-}}"
+
+  if [[ -z "$endpoint" || -z "$token" || -z "$account" || -z "$workspace" ]]; then
+    echo "Skipping Insights ingest: need IACM endpoint, token, account, and workspace."
+    echo "Set PLUGIN_ENDPOINT_VARIABLES (IACM plugin env) or HARNESS_IACM_SERVICE_ENDPOINT / HARNESS_IACM_SERVICE_TOKEN / PLUGIN_WORKSPACE."
+    return 0
+  fi
+
+  endpoint="${endpoint%/}"
+  echo "Ingesting findings into ${endpoint}/api/orgs/${org}/projects/${project}/workspaces/${workspace}/insights/security"
+  curl -sS -o ingest_response.txt -w "Insights ingest HTTP %{http_code}\n" \
+    -X POST \
+    -H "Content-Type: application/json" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Harness-Account: ${account}" \
+    --data @ingest_findings.json \
+    "${endpoint}/api/orgs/${org}/projects/${project}/workspaces/${workspace}/insights/security" || true
+  if [[ -s ingest_response.txt ]]; then
+    cat ingest_response.txt
+    echo
+  fi
+}
+
+ingest_insights
