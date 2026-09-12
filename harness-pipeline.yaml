@@ -1,0 +1,52 @@
+pipeline:
+  name: DeepSource IaC Insights Demo
+  identifier: deepsource_iac_insights_demo
+  projectIdentifier: <+input>
+  orgIdentifier: <+input>
+  tags: {}
+  stages:
+    - stage:
+        name: Plan
+        identifier: plan
+        type: IACM
+        spec:
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          workspace: <+input>
+          execution:
+            steps:
+              # --- NEW: DeepSource scan, runs right after clone, before init/plan ---
+              - step:
+                  type: Run
+                  name: DeepSource Scan
+                  identifier: deepsource_scan
+                  spec:
+                    connectorRef: account.harnessImage
+                    image: python:3.11-slim
+                    shell: Sh
+                    envVariables:
+                      DEEPSOURCE_TOKEN: <+secrets.getValue("deepsource_pat")>
+                      DEEPSOURCE_REPO: deepsource-iac-demo
+                      DEEPSOURCE_LOGIN: <+input>
+                      DEEPSOURCE_VCS: GITHUB
+                    command: |-
+                      apt-get update -qq && apt-get install -y -qq curl >/dev/null
+                      chmod +x ./deepsource-scan.sh
+                      ./deepsource-scan.sh
+                  timeout: 5m
+              - step:
+                  type: IACMTerraformPlugin
+                  name: Init
+                  identifier: init
+                  spec:
+                    command: init
+              - step:
+                  type: IACMTerraformPlugin
+                  name: Plan
+                  identifier: plan
+                  spec:
+                    command: plan
