@@ -69,13 +69,16 @@ if not repo:
     print(json.dumps(data, indent=2))
     sys.exit(0)
 
+name = repo.get("name")
+activated = repo.get("isActivated")
 runs = repo.get("latestAnalysisRun", {}).get("edges", [])
 if not runs:
-    print(f"Repository {repo[\"name\"]!r} activated={repo[\"isActivated\"]!r} but no analysis runs yet.")
+    print("Repository %r activated=%r but no analysis runs yet." % (name, activated))
     sys.exit(0)
 
 run = runs[0]["node"]
-print(f"Repository: {repo[\"name\"]}  |  Run status: {run[\"status\"]}  |  Commit: {run[\"commitOid\"][:8]}")
+commit = (run.get("commitOid") or "")[:8]
+print("Repository: %s  |  Run status: %s  |  Commit: %s" % (name, run.get("status"), commit))
 print("-" * 56)
 
 issues = run.get("issues", {}).get("edges", [])
@@ -84,9 +87,9 @@ if not issues:
 else:
     for edge in issues:
         node = edge["node"]
-        print(f"[{node[\"severity\"]:>8}] {node[\"shortcode\"]:<12} {node[\"path\"]}")
-        print(f"           {node[\"title\"]}")
+        print("[%8s] %-12s %s" % (node.get("severity"), node.get("shortcode"), node.get("path")))
+        print("           %s" % node.get("title"))
     print("-" * 56)
-    print(f"Total issues: {len(issues)}")
+    print("Total issues: %s" % len(issues))
 '
 echo "======================================================="
